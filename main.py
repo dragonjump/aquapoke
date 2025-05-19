@@ -51,15 +51,21 @@ FISH_COLORS = [
     (0, 255, 255),  # Yellow
     (128, 0, 128),  # Purple
     (255,192,203),  # Pink
-    (0,128,0)       # Dark Green
+    (0,128,0),      # Dark Green
+    (0,255,0),      # Bright Green (new)
+    (255,255,255),  # White (new)
+    (0,140,255)     # Deep Orange (new)
 ]
 fish_list = []
 
 # --- PNG Fish Image Loading ---
-FISH_PNG_PATH = 'fish.png'
-fish_png_img = None
-if os.path.exists(FISH_PNG_PATH):
-    fish_png_img = cv2.imread(FISH_PNG_PATH, cv2.IMREAD_UNCHANGED)
+FISH_PNG_PATHS = ['fish.png', 'fish2.png', 'fish3.png', 'fish4.png']
+fish_png_imgs = []
+for path in FISH_PNG_PATHS:
+    if os.path.exists(path):
+        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        if img is not None:
+            fish_png_imgs.append(img)
 
 class Fish:
     """Represents a single animated fish."""
@@ -68,28 +74,25 @@ class Fish:
         self.frame_height = frame_height
         self.x = random.randint(0, frame_width)
         self.y = random.randint(0, frame_height)
-        self.size = random.randint(25, 50)  # Body length
+        self.size = random.randint(25, 50) * 2  # Body length, doubled for bigger fish
         self.color = random.choice(FISH_COLORS)
         self.dx = random.choice([-2, -1.5, -1, 1, 1.5, 2])  # Speed in x
         self.dy = random.choice([-1, -0.5, 0.5, 1])      # Speed in y
-        # Randomly choose to use PNG or not (if available)
-        self.use_png = (fish_png_img is not None) and (random.random() < 0.5)
+        # Randomly choose to use one of the PNGs (if available)
+        self.png_idx = None
+        if fish_png_imgs and random.random() < 0.5:
+            self.png_idx = random.randint(0, len(fish_png_imgs)-1)
 
     def update(self):
-        """Updates the fish's position and handles boundary collisions."""
         self.x += self.dx
         self.y += self.dy
-
         # Boundary checks and direction change
-        # Check X boundaries (considering body length for visual)
         if self.x - self.size // 2 < 0:
             self.x = self.size // 2
             self.dx *= -1
         elif self.x + self.size // 2 > self.frame_width:
             self.x = self.frame_width - self.size // 2
             self.dx *= -1
-        
-        # Check Y boundaries (considering body height for visual)
         if self.y - self.size // 4 < 0:
             self.y = self.size // 4
             self.dy *= -1
@@ -98,12 +101,10 @@ class Fish:
             self.dy *= -1
 
     def draw(self, on_frame):
-        """Draws the fish on the given frame, using PNG or OpenCV shapes."""
         body_center = (int(self.x), int(self.y))
         body_axes = (self.size // 2, self.size // 4)
-        if self.use_png and fish_png_img is not None:
-            # Overlay PNG, resize to fit fish size
-            overlay_png(on_frame, fish_png_img, body_center[0], body_center[1], size=(self.size, self.size))
+        if self.png_idx is not None and 0 <= self.png_idx < len(fish_png_imgs):
+            overlay_png(on_frame, fish_png_imgs[self.png_idx], body_center[0], body_center[1], size=(self.size, self.size))
         else:
             # Old OpenCV drawing
             cv2.ellipse(on_frame, body_center, body_axes, 0, 0, 360, self.color, -1)
@@ -325,6 +326,8 @@ def overlay_png(bg, fg, x, y, size=None):
 def run_air_painter():
     global canvas, current_mode, last_points, fish_list
 
+    highscore = 0
+
     # Try index 0 with DirectShow backend (best for Windows)
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     if not cap.isOpened():
@@ -451,6 +454,7 @@ def run_air_painter():
                         exploding_fish_list.append(ExplodingFish(cx, cy, fish_obj.color))
                         # Respawn fish at a new location
                         fish_list[idx] = Fish(frame_width, frame_height)
+                        highscore += 1
                         hit = True
                         break
             if not hit:
@@ -473,6 +477,17 @@ def run_air_painter():
         final_background_part = cv2.bitwise_and(background_with_fish, background_with_fish, mask=drawing_mask_inv)
         final_drawing_part = cv2.bitwise_and(canvas, canvas, mask=drawing_mask)
         display_frame = cv2.add(final_background_part, final_drawing_part)
+
+        # Draw highscore at top right
+        score_text = f"Score: {highscore}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 1.2
+        thickness = 3
+        text_size, _ = cv2.getTextSize(score_text, font, font_scale, thickness)
+        text_x = background_with_fish.shape[1] - text_size[0] - 30
+        text_y = 50
+        cv2.putText(background_with_fish, score_text, (text_x, text_y), font, font_scale, (0,0,0), thickness+2, cv2.LINE_AA)
+        cv2.putText(background_with_fish, score_text, (text_x, text_y), font, font_scale, (255,255,0), thickness, cv2.LINE_AA)
 
         cv2.imshow("Air Painter", display_frame)
 
