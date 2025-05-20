@@ -1,3 +1,4 @@
+## Aqua Poke
 # Fish & Shark Interactive Game (Webcam, OpenCV, MediaPipe)
 
 This is a webcam-based interactive game where you use your hands (and optionally leg kicks) to interact with animated fish and sharks on the screen. The game uses real-time hand and pose detection (MediaPipe) to let you "poke" or "kick" the fish, causing them to explode and increase your score. Some fish use PNG images for variety, and there are animated sharks for extra fun!
