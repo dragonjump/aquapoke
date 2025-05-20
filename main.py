@@ -1,7 +1,9 @@
+# Requires: pip install mediapipe
 import cv2
 import numpy as np
 import random
 import os
+import mediapipe as mp
 
 # --- Global Variables ---
 # Drawing modes
@@ -375,6 +377,16 @@ def run_air_painter():
     print("-------------------------------")
     print("If color detection is not working well, you may need to adjust the HSV values in the code.")
 
+    # Initialize MediaPipe Pose
+    mp_pose = mp.solutions.pose
+    if 'mp_pose_instance' not in globals():
+        global mp_pose_instance
+        mp_pose_instance = mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.5)
+    last_ankle_pos = {'left': None, 'right': None}
+    kick_cooldown = {'left': 0, 'right': 0}
+    KICK_THRESHOLD = 60  # Minimum upward movement in pixels to count as a kick
+    KICK_COOLDOWN_FRAMES = 15
+    kick_flash = []  # List of (x, y, frame_count)
 
     while True:
         ret, frame = cap.read()
@@ -384,6 +396,35 @@ def run_air_painter():
 
         frame = cv2.flip(frame, 1) # Mirror frame
         hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        # --- MediaPipe Pose for Leg Kick Detection ---
+        pose_results = mp_pose_instance.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        h, w = frame.shape[:2]
+        if pose_results.pose_landmarks:
+            # Left ankle = 27, Right ankle = 28
+            left_ankle = pose_results.pose_landmarks.landmark[27]
+            right_ankle = pose_results.pose_landmarks.landmark[28]
+            lx, ly = int(left_ankle.x * w), int(left_ankle.y * h)
+            rx, ry = int(right_ankle.x * w), int(right_ankle.y * h)
+            # Draw circles at ankles
+            cv2.circle(frame, (lx, ly), 30, (0,255,0), 3)
+            cv2.circle(frame, (rx, ry), 30, (255,0,0), 3)
+            # Detect upward kick (y decreases by threshold)
+            for side, (x, y) in zip(['left', 'right'], [(lx, ly), (rx, ry)]):
+                if last_ankle_pos[side] is not None and kick_cooldown[side] == 0:
+                    prev_y = last_ankle_pos[side][1]
+                    if prev_y - y > KICK_THRESHOLD:
+                        print(f"{side.capitalize()} leg kick detected!")
+                        kick_flash.append({'x': x, 'y': y, 'frames': 0, 'color': (0,255,0) if side=='left' else (255,0,0)})
+                        kick_cooldown[side] = KICK_COOLDOWN_FRAMES
+                last_ankle_pos[side] = (x, y)
+                if kick_cooldown[side] > 0:
+                    kick_cooldown[side] -= 1
+        # Draw kick flash effect
+        for flash in kick_flash:
+            cv2.circle(frame, (flash['x'], flash['y']), 60, flash['color'], -1)
+            flash['frames'] += 1
+        kick_flash = [f for f in kick_flash if f['frames'] < 8]
 
         # --- Create background with fish ---
         background_with_fish = frame.copy() # Fish will be drawn on top of camera feed
@@ -413,39 +454,39 @@ def run_air_painter():
         soft_splash_list = [s for s in soft_splash_list if not s.is_done()]
 
         # --- MULTI-POINTER PALM DETECTION ---
-        # Find up to two largest skin-colored contours, use their centroids as palm centers
-        skin_mask = cv2.inRange(hsv_frame, SKIN_LOWER, SKIN_UPPER)
-        skin_mask = cv2.erode(skin_mask, None, iterations=2)
-        skin_mask = cv2.dilate(skin_mask, None, iterations=2)
-        contours, _ = cv2.findContours(skin_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Use MediaPipe Hands for robust palm detection
+        mp_hands = mp.solutions.hands
+        mp_drawing = mp.solutions.drawing_utils
+        if 'mp_hands_instance' not in globals():
+            global mp_hands_instance
+            mp_hands_instance = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.5)
         palm_centers = []
-        if contours:
-            # Sort contours by area, descending
-            contours = sorted(contours, key=cv2.contourArea, reverse=True)
-            for i, cnt in enumerate(contours[:2]):
-                if cv2.contourArea(cnt) > 1000:
-                    M = cv2.moments(cnt)
-                    if M["m00"] != 0:
-                        cx = int(M["m10"] / M["m00"])
-                        cy = int(M["m01"] / M["m00"])
-                        palm_centers.append((cx, cy))
-                        # Draw pointer: triangle with nice opacity outline
-                        tri_height = 120
-                        tri_base = 90
-                        pt_top = (cx, cy - tri_height // 2)
-                        pt_left = (cx - tri_base // 2, cy + tri_height // 2)
-                        pt_right = (cx + tri_base // 2, cy + tri_height // 2)
-                        triangle = np.array([[pt_top, pt_left, pt_right]], dtype=np.int32)
-                        overlay = background_with_fish.copy()
-                        if i == 0:
-                            fill_color = (0, 255, 255)
-                            outline_color = (0, 255, 255)
-                        else:
-                            fill_color = (255, 0, 255)
-                            outline_color = (255, 0, 255)
-                        cv2.fillPoly(overlay, triangle, fill_color)
-                        cv2.addWeighted(overlay, 0.25, background_with_fish, 0.75, 0, background_with_fish)
-                        cv2.polylines(background_with_fish, triangle, isClosed=True, color=outline_color, thickness=6, lineType=cv2.LINE_AA)
+        results = mp_hands_instance.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        if results.multi_hand_landmarks:
+            for i, hand_landmarks in enumerate(results.multi_hand_landmarks):
+                # Palm center: average of landmarks 0, 5, 9, 13, 17
+                h, w = frame.shape[:2]
+                palm_points = [hand_landmarks.landmark[j] for j in [0, 5, 9, 13, 17]]
+                cx = int(np.mean([p.x for p in palm_points]) * w)
+                cy = int(np.mean([p.y for p in palm_points]) * h)
+                palm_centers.append((cx, cy))
+                # Draw pointer: triangle with nice opacity outline
+                tri_height = 120
+                tri_base = 90
+                pt_top = (cx, cy - tri_height // 2)
+                pt_left = (cx - tri_base // 2, cy + tri_height // 2)
+                pt_right = (cx + tri_base // 2, cy + tri_height // 2)
+                triangle = np.array([[pt_top, pt_left, pt_right]], dtype=np.int32)
+                overlay = background_with_fish.copy()
+                if i == 0:
+                    fill_color = (0, 255, 255)
+                    outline_color = (0, 255, 255)
+                else:
+                    fill_color = (255, 0, 255)
+                    outline_color = (255, 0, 255)
+                cv2.fillPoly(overlay, triangle, fill_color)
+                cv2.addWeighted(overlay, 0.25, background_with_fish, 0.75, 0, background_with_fish)
+                cv2.polylines(background_with_fish, triangle, isClosed=True, color=outline_color, thickness=6, lineType=cv2.LINE_AA)
 
         # --- PALM-FISH COLLISION DETECTION ---
         COLLISION_RADIUS = 120  # Sensitivity: treat pointer as a circle of this radius
