@@ -429,13 +429,23 @@ def run_air_painter():
                         cx = int(M["m10"] / M["m00"])
                         cy = int(M["m01"] / M["m00"])
                         palm_centers.append((cx, cy))
-                        # Draw pointer: first is yellow, second is purple
+                        # Draw pointer: triangle with nice opacity outline
+                        tri_height = 120
+                        tri_base = 90
+                        pt_top = (cx, cy - tri_height // 2)
+                        pt_left = (cx - tri_base // 2, cy + tri_height // 2)
+                        pt_right = (cx + tri_base // 2, cy + tri_height // 2)
+                        triangle = np.array([[pt_top, pt_left, pt_right]], dtype=np.int32)
+                        overlay = background_with_fish.copy()
                         if i == 0:
-                            cv2.circle(background_with_fish, (cx, cy), 60, (0,255,255), 3) # Yellow outer
-                            cv2.circle(background_with_fish, (cx, cy), 25, (0,0,255), -1)   # Red inner
-                        elif i == 1:
-                            cv2.circle(background_with_fish, (cx, cy), 60, (255,0,255), 3) # Purple outer
-                            cv2.circle(background_with_fish, (cx, cy), 25, (255,0,0), -1)   # Blue inner
+                            fill_color = (0, 255, 255)
+                            outline_color = (0, 255, 255)
+                        else:
+                            fill_color = (255, 0, 255)
+                            outline_color = (255, 0, 255)
+                        cv2.fillPoly(overlay, triangle, fill_color)
+                        cv2.addWeighted(overlay, 0.25, background_with_fish, 0.75, 0, background_with_fish)
+                        cv2.polylines(background_with_fish, triangle, isClosed=True, color=outline_color, thickness=6, lineType=cv2.LINE_AA)
 
         # --- PALM-FISH COLLISION DETECTION ---
         COLLISION_RADIUS = 120  # Sensitivity: treat pointer as a circle of this radius
@@ -484,7 +494,7 @@ def run_air_painter():
         font_scale = 1.2
         thickness = 3
         text_size, _ = cv2.getTextSize(score_text, font, font_scale, thickness)
-        text_x = background_with_fish.shape[1] - text_size[0] - 30
+        text_x = (background_with_fish.shape[1] - text_size[0]) // 2
         text_y = 50
         cv2.putText(background_with_fish, score_text, (text_x, text_y), font, font_scale, (0,0,0), thickness+2, cv2.LINE_AA)
         cv2.putText(background_with_fish, score_text, (text_x, text_y), font, font_scale, (255,255,0), thickness, cv2.LINE_AA)
